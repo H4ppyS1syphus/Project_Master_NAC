@@ -38,6 +38,8 @@ In either Windows or macOS, with your virtual environment active, install all de
 
 ## 3. Repository Contents
 
+  ```bash
+
 ├── data/
 │   ├── Li6.npz
 │   ├── Po.npz
@@ -54,7 +56,7 @@ In either Windows or macOS, with your virtual environment active, install all de
 ├── PulseShape_Discrimination.ipynb
 ├── requirements.txt
 └── README.md
-
+```
 
 ### 3.1. PulseShape_Discrimination.ipynb
 A Jupyter Notebook presenting the main workflow:
