@@ -370,62 +370,118 @@ def evaluate(model, dataloader, criterion, device):
 ##############################################################################
 # deep_learning.py
 
-def train_and_evaluate(model, train_loader, test_loader, num_epochs=10, learning_rate=1e-3, device=None):
+def train_and_evaluate(model, train_loader, test_loader, 
+                       num_epochs=10, learning_rate=1e-3, device=None):
     """
     Trains and evaluates the model over multiple epochs.
-    
-    Args:
-        model (nn.Module): The neural network model to train.
-        train_loader (DataLoader): DataLoader for the training dataset.
-        test_loader (DataLoader): DataLoader for the testing dataset.
-        num_epochs (int): Number of epochs to train.
-        learning_rate (float): Learning rate for the optimizer.
-        device (torch.device): Device to run the training on.
-    
-    Returns:
-        model (nn.Module): The trained model.
-        metrics (dict): Dictionary containing training and testing loss and accuracy lists.
+    Automatically plots the training/testing loss & accuracy,
+    plus the confusion matrix at the end.
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     criterion = nn.CrossEntropyLoss()
 
-    # Initialize lists to store metrics
+    # Lists to store metrics
     train_losses, test_losses = [], []
     train_accs, test_accs = [], []
 
-    for epoch in range(1, num_epochs+1):
-        tr_loss, tr_acc = train_one_epoch(model, train_loader, optimizer, criterion, device)
-        ts_loss, ts_acc, preds, labels = evaluate(model, test_loader, criterion, device)
+    all_preds, all_labels = None, None  # placeholders for final confusion matrix
+
+    for epoch in range(1, num_epochs + 1):
+        # 1) Training step
+        tr_loss, tr_acc = train_one_epoch(
+            model, train_loader, optimizer, criterion, device
+        )
+
+        # 2) Testing step
+        ts_loss, ts_acc, preds, labels = evaluate(
+            model, test_loader, criterion, device
+        )
 
         train_losses.append(tr_loss)
         test_losses.append(ts_loss)
         train_accs.append(tr_acc)
         test_accs.append(ts_acc)
 
+        # Save these for final confusion matrix
+        all_preds  = preds
+        all_labels = labels
+
         print(f"[Epoch {epoch}/{num_epochs}] "
               f"Train Loss={tr_loss:.4f}, Acc={tr_acc:.2f}% | "
               f"Test Loss={ts_loss:.4f}, Acc={ts_acc:.2f}%")
 
-    # Final confusion matrix
-    cm = confusion_matrix(labels, preds)
-    plt.figure(figsize=(6,6))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=["Li6","Po"], yticklabels=["Li6","Po"])
-    plt.title("Confusion Matrix (Test Set)")
-    plt.ylabel("True Label")
-    plt.xlabel("Predicted Label")
+    # -- Plot Loss and Accuracy Curves --
+    plt.figure(figsize=(14, 5))
+
+    # Subplot 1: Loss
+    plt.subplot(1, 2, 1)
+    plt.plot(range(1, num_epochs+1), train_losses, label='Train Loss', marker='o')
+    plt.plot(range(1, num_epochs+1), test_losses,  label='Test Loss', marker='o')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Training and Testing Loss over Epochs')
+    plt.legend()
+    plt.grid(True)
+
+    # Subplot 2: Accuracy
+    plt.subplot(1, 2, 2)
+    plt.plot(range(1, num_epochs+1), train_accs, label='Train Accuracy', marker='o')
+    plt.plot(range(1, num_epochs+1), test_accs,  label='Test Accuracy', marker='o')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy (%)')
+    plt.title('Training and Testing Accuracy over Epochs')
+    plt.legend()
+    plt.grid(True)
+
+    plt.tight_layout()
     plt.show()
 
-    # Compile metrics into a dictionary
-    metrics = {
-        'train_losses': train_losses,
-        'test_losses': test_losses,
-        'train_accs': train_accs,
-        'test_accs': test_accs
-    }
+    # -- Final Confusion Matrix --
+    if all_preds is not None and all_labels is not None:
+        plot_confusion_matrix(
+            true_labels=all_labels, 
+            pred_labels=all_preds, 
+            class_names=["Li6","Po"],
+            title="Confusion Matrix (Final)"
+        )
 
+    # Return the model + any metrics you want to track
+    metrics = {
+        "train_losses": train_losses,
+        "test_losses": test_losses,
+        "train_accs": train_accs,
+        "test_accs": test_accs
+    }
     return model, metrics
 
+
+def plot_confusion_matrix(true_labels, pred_labels, class_names=None, title="Confusion Matrix"):
+    """
+    Plots a confusion matrix using Seaborn heatmap.
+    
+    Args:
+        true_labels (list or np.array): Ground-truth labels.
+        pred_labels (list or np.array): Model-predicted labels.
+        class_names (list): Optional list of class names for x/y axes.
+        title (str): Plot title.
+    """
+    cm = confusion_matrix(true_labels, pred_labels)
+    
+    plt.figure(figsize=(5,4))
+    sns.heatmap(
+        cm, 
+        annot=True, 
+        fmt="d", 
+        cmap="Blues",
+        xticklabels=class_names if class_names else ["Class 0", "Class 1"],
+        yticklabels=class_names if class_names else ["Class 0", "Class 1"]
+    )
+    plt.title(title)
+    plt.xlabel("Predicted")
+    plt.ylabel("True")
+    plt.tight_layout()
+    plt.show()
