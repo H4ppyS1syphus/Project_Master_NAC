@@ -60,74 +60,55 @@ class ScintillationDataset(Dataset):
 ##############################################################################
 class TwoDConvNet(nn.Module):
     """
-    2D conv layers => in_channels=1, 'height'=4, 'width'=time_window
-    We'll do 3 or 4 conv layers with increasing channels,
-    large dropout (0.7), BN in first layers, then flatten.
+    A smaller version of the TwoDConvNet model for more efficient computation.
     """
     def __init__(self, num_classes=2, height=4, width=2000):
         super().__init__()
-        # We'll assume input => (batch, 1, 4, width).
-        # conv1 => out_channels=8
-        self.conv1 = nn.Conv2d(in_channels=1, out_channels=8, kernel_size=(3,3), padding=(1,1))
-        self.bn1   = nn.BatchNorm2d(8)
+        # Input shape: (batch, 1, 4, width)
+        
+        # Reduce the number of convolutional layers and parameters
+        self.conv1 = nn.Conv2d(in_channels=1, out_channels=8, kernel_size=(3, 3), padding=(1, 1))
+        self.bn1 = nn.BatchNorm2d(8)
 
-        self.conv2 = nn.Conv2d(in_channels=8, out_channels=16, kernel_size=(3,3), padding=(1,1))
-        self.bn2   = nn.BatchNorm2d(16)
+        self.conv2 = nn.Conv2d(in_channels=8, out_channels=16, kernel_size=(3, 3), padding=(1, 1))
+        self.bn2 = nn.BatchNorm2d(16)
 
-        self.conv3 = nn.Conv2d(in_channels=16, out_channels=32, kernel_size=(3,3), padding=(1,1))
-        self.bn3   = nn.BatchNorm2d(32)
+        self.pool = nn.MaxPool2d(kernel_size=(2, 2))  # Reduce both dimensions by half
+        self.dropout = nn.Dropout(p=0.5)  # Lower dropout rate for smaller model
+        self.relu = nn.ReLU()
 
-        # Optionally a 4th conv => out_channels=64
-        self.conv4 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=(3,3), padding=(1,1))
-        self.bn4   = nn.BatchNorm2d(64)
-
-        self.pool     = nn.MaxPool2d(kernel_size=(2,2))  # reduce both dims
-        self.dropout  = nn.Dropout(p=0.7)
-        self.relu     = nn.ReLU()
-
-        # We'll do 2 pooling steps => or 1? Let's do 2 pools to shrink further:
-        # but for simplicity, let's do only 1 pool layer => let's see
-        # Actually, we can do a single pool => shape => (batch,64,2, width//2) if height=4 => after pool => height=2, width=width//2
-
-        # final shape => channels=64, height=2, width= (width//2)
-        # => flatten => 64*2*(width//2)
-        out_c  = 64
-        out_h  = 2
-        out_w  = width // 2
+        # Output shape after convolution and pooling layers:
+        # Assuming input shape is (batch, 1, 4, width)
+        out_c = 16
+        out_h = 2
+        out_w = width // 2
         in_features = out_c * out_h * out_w
 
-        self.fc1 = nn.Linear(in_features, 1024)
-        self.fc2 = nn.Linear(1024, num_classes)
+        # Fully connected layers
+        self.fc1 = nn.Linear(in_features, 256)  # Reduced number of hidden units
+        self.fc2 = nn.Linear(256, num_classes)
 
     def forward(self, x):
-        # x => (batch,1,4,width)
-        x = self.conv1(x)   # => (batch,8,4,width)
+        # Input: (batch, 1, 4, width)
+        x = self.conv1(x)  # => (batch, 8, 4, width)
         x = self.bn1(x)
         x = self.relu(x)
 
-        x = self.conv2(x)   # => (batch,16,4,width)
+        x = self.conv2(x)  # => (batch, 16, 4, width)
         x = self.bn2(x)
         x = self.relu(x)
 
-        x = self.conv3(x)   # => (batch,32,4,width)
-        x = self.bn3(x)
-        x = self.relu(x)
-
-        x = self.conv4(x)   # => (batch,64,4,width)
-        x = self.bn4(x)
-        x = self.relu(x)
-
-        # pool => (batch,64,2,width//2)
-        x = self.pool(x)
+        x = self.pool(x)  # => (batch, 16, 2, width//2)
         x = self.dropout(x)
 
-        # flatten
-        x = x.view(x.size(0), -1)  # => shape (batch,64*2*(width//2))
+        # Flatten
+        x = x.view(x.size(0), -1)  # => (batch, 16 * 2 * (width//2))
 
         x = self.fc1(x)
         x = self.relu(x)
         x = self.fc2(x)
         return x
+
 
 ##############################################################################
 # 3) MultiBranchCNN: one 1D CNN per channel
