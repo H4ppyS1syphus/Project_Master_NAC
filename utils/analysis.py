@@ -10,6 +10,10 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+
 def find_threshold_for_contamination(
     probabilities_li6, 
     labels, 
@@ -40,28 +44,49 @@ def find_threshold_for_contamination(
     
     # 2) Sweep down from highest to lowest probability
     #    For each unique prob, see how many Po are classified as Li6
-    #    fraction of misclassified Po = (#Po with prob>threshold) / total_po
     misclassified_po_count = 0
     for i, prob in enumerate(sorted_probs):
         lbl = sorted_labels[i]
-        # If it's Po, at or above the current prob => mislabeled as Li6
         if lbl == 1:
             misclassified_po_count += 1
         
         fraction_po_mis = misclassified_po_count / total_po
-        # Once we exceed the contamination level, the threshold is the prob of the last point
         if fraction_po_mis > max_po_contamination:
-            # The threshold is just below this prob
-            # We can take threshold = sorted_probs[i] if we want strictly less contamination
-            # or threshold = sorted_probs[i+1] if we want to accept this point
             idx_threshold = i - 1 if i > 0 else 0
             threshold = sorted_probs[idx_threshold]
             return threshold
     
-    # If we never exceed max_po_contamination, means we can accept even the lowest prob
-    # => contamination is never above 5%, so threshold can be the min prob
     return sorted_probs[-1]
 
+def plot_histograms_and_confusion_matrices(probabilities_li6, labels, threshold):
+    """
+    Plots histograms of probabilities and confusion matrices for given thresholds.
+
+    Args:
+        probabilities_li6 (np.ndarray): Predicted probabilities for Li6.
+        labels (np.ndarray): True labels (0=Li6, 1=Po).
+        threshold (float): Computed threshold for classification.
+    """
+    # Plot histograms
+    plt.figure(figsize=(12, 6))
+    plt.hist(probabilities_li6[labels == 0], bins=50, alpha=0.5, label="Li6", color="blue")
+    plt.hist(probabilities_li6[labels == 1], bins=50, alpha=0.5, label="Po", color="red")
+    plt.axvline(threshold, color="green", linestyle="--", label=f"Threshold (Found) = {threshold:.2f}")
+    plt.axvline(0.5, color="orange", linestyle="--", label="Threshold = 0.5")
+    plt.xlabel("Predicted Probability")
+    plt.ylabel("Frequency")
+    plt.title("Histogram of Predicted Probabilities")
+    plt.legend()
+    plt.show()
+
+    # Compute and display confusion matrices
+    for thr, name in [(0.5, "Threshold = 0.5"), (threshold, f"Threshold = {threshold:.2f}")]:
+        preds = (probabilities_li6 >= thr).astype(int)
+        cm = confusion_matrix(labels, preds, labels=[0, 1])
+        disp = ConfusionMatrixDisplay(cm, display_labels=["Li6", "Po"])
+        disp.plot(cmap="Blues")
+        plt.title(name)
+        plt.show()
 
 def classify_dataset(
     model, 

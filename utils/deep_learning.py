@@ -61,54 +61,55 @@ class ScintillationDataset(Dataset):
 class TwoDConvNet(nn.Module):
     """
     A smaller version of the TwoDConvNet model for more efficient computation.
+    Reduced the number of convolutional layers and filters.
     """
     def __init__(self, num_classes=2, height=4, width=2000):
         super().__init__()
         # Input shape: (batch, 1, 4, width)
         
-        # Reduce the number of convolutional layers and parameters
-        self.conv1 = nn.Conv2d(in_channels=1, out_channels=8, kernel_size=(3, 3), padding=(1, 1))
-        self.bn1 = nn.BatchNorm2d(8)
+        # Single convolutional layer with fewer filters
+        self.conv1 = nn.Conv2d(in_channels=1, out_channels=4, kernel_size=(3, 3), padding=(1, 1))
+        self.bn1 = nn.BatchNorm2d(4)
 
-        self.conv2 = nn.Conv2d(in_channels=8, out_channels=16, kernel_size=(3, 3), padding=(1, 1))
-        self.bn2 = nn.BatchNorm2d(16)
+        # Optional second convolutional layer (commented out to reduce size)
+        # self.conv2 = nn.Conv2d(in_channels=4, out_channels=8, kernel_size=(3, 3), padding=(1, 1))
+        # self.bn2 = nn.BatchNorm2d(8)
 
         self.pool = nn.MaxPool2d(kernel_size=(2, 2))  # Reduce both dimensions by half
-        self.dropout = nn.Dropout(p=0.5)  # Lower dropout rate for smaller model
+        self.dropout = nn.Dropout(p=0.3)  # Lower dropout rate for smaller model
         self.relu = nn.ReLU()
 
-        # Output shape after convolution and pooling layers:
-        # Assuming input shape is (batch, 1, 4, width)
-        out_c = 16
-        out_h = 2
+        # Calculate the number of input features for the first fully connected layer
+        out_c = 4  # Reduced number of channels
+        out_h = height // 2  # After pooling
         out_w = width // 2
         in_features = out_c * out_h * out_w
 
-        # Fully connected layers
-        self.fc1 = nn.Linear(in_features, 256)  # Reduced number of hidden units
-        self.fc2 = nn.Linear(256, num_classes)
+        # Fully connected layers with fewer units
+        self.fc1 = nn.Linear(in_features, 128)  # Reduced number of hidden units
+        self.fc2 = nn.Linear(128, num_classes)
 
     def forward(self, x):
         # Input: (batch, 1, 4, width)
-        x = self.conv1(x)  # => (batch, 8, 4, width)
+        x = self.conv1(x)  # => (batch, 4, 4, width)
         x = self.bn1(x)
         x = self.relu(x)
 
-        x = self.conv2(x)  # => (batch, 16, 4, width)
-        x = self.bn2(x)
-        x = self.relu(x)
+        # Optional second conv layer
+        # x = self.conv2(x)  # => (batch, 8, 4, width)
+        # x = self.bn2(x)
+        # x = self.relu(x)
 
-        x = self.pool(x)  # => (batch, 16, 2, width//2)
+        x = self.pool(x)  # => (batch, 4, 2, width//2)
         x = self.dropout(x)
 
         # Flatten
-        x = x.view(x.size(0), -1)  # => (batch, 16 * 2 * (width//2))
+        x = x.view(x.size(0), -1)  # => (batch, 4 * 2 * (width//2))
 
         x = self.fc1(x)
         x = self.relu(x)
         x = self.fc2(x)
         return x
-
 
 ##############################################################################
 # 3) MultiBranchCNN: one 1D CNN per channel
