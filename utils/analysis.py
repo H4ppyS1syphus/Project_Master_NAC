@@ -93,23 +93,35 @@ def classify_dataset(
     waveforms, 
     device, 
     batch_size=64, 
-    threshold=0.5
+    threshold=0.5,
+    true_labels=None,
+    plot=False
 ):
     """
-    Classifies a new dataset using a specified probability threshold for Li6.
+    Classifies a new dataset using a specified probability threshold for Li6 and optionally plots a confusion matrix.
 
     Args:
         model (torch.nn.Module): Trained model (output shape [N, 2] for 2 classes).
-        waveforms (np.ndarray): shape (N, 4, T) => waveforms to classify.
+        waveforms (np.ndarray): Shape (N, 4, T) => waveforms to classify.
         device (torch.device): Device to use (CPU or GPU).
-        batch_size (int): Batch size for the DataLoader.
-        threshold (float): Probability threshold for labeling a sample as Li6.
+        batch_size (int, optional): Batch size for the DataLoader. Defaults to 64.
+        threshold (float, optional): Probability threshold for labeling a sample as Li6. Defaults to 0.5.
+        true_labels (np.ndarray, optional): Ground truth labels (0=Li6, 1=Po) for the waveforms. Required for plotting confusion matrix.
+        plot (bool, optional): Whether to plot the confusion matrix. Requires true_labels. Defaults to False.
 
     Returns:
-        np.ndarray: Predicted labels (0=Li6, 1=Po) for each sample.
+        tuple:
+            - np.ndarray: Predicted labels (0=Li6, 1=Po) for each sample.
+            - np.ndarray: Probabilities of Li6 (P(Li)) for each sample.
+            - np.ndarray: Probabilities of Po (P(Po)) for each sample.
     """
+    import torch
+    import numpy as np
     from torch.utils.data import TensorDataset, DataLoader
-    
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    from sklearn.metrics import confusion_matrix
+
     # Convert waveforms to Tensor, no ground truth labels
     data_tensor = torch.tensor(waveforms, dtype=torch.float32)
     # Expand dims => shape (N,1,4,T)
@@ -117,19 +129,45 @@ def classify_dataset(
     
     dataset = TensorDataset(data_tensor)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
-
+    
     model.eval()
     predicted_labels = []
-
+    probs_li6 = []
+    probs_po = []
+    
     with torch.no_grad():
         for (batch_x,) in loader:
             batch_x = batch_x.to(device)
             logits = model(batch_x)         # shape => (B, 2)
-            probs  = torch.softmax(logits, dim=1)  # shape => (B, 2)
-            probs_li6 = probs[:, 0]         # Probability of Li6
-
-            # Compare with threshold => if > threshold => label=0 (Li6), else=1 (Po)
-            batch_preds = (probs_li6 > threshold).long().cpu().numpy()
+            probs = torch.softmax(logits, dim=1)  # shape => (B, 2)
+            probs = probs.cpu().numpy()
+            probs_li6_batch = probs[:, 0]    # Probability of Li6
+            probs_po_batch = probs[:, 1]     # Probability of Po
+    
+            # Compare with threshold => if P(Li6) > threshold => label=0 (Li6), else=1 (Po)
+            batch_preds = (probs_li6_batch > threshold).astype(int)
             predicted_labels.extend(batch_preds)
-
-    return np.array(predicted_labels)
+            probs_li6.extend(probs_li6_batch)
+            probs_po.extend(probs_po_batch)
+    
+    predicted_labels = np.array(predicted_labels)
+    probs_li6 = np.array(probs_li6)
+    probs_po = np.array(probs_po)
+    
+    # If plotting is requested and true labels are provided
+    if plot:
+        if true_labels is None:
+            raise ValueError("True labels must be provided for plotting the confusion matrix.")
+        
+        # Compute confusion matrix
+        cm = confusion_matrix(true_labels, predicted_labels)
+        
+        # Plot confusion matrix
+        plt.figure(figsize=(6,5))
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=['Li6', 'Po'], yticklabels=['Li6', 'Po'])
+        plt.xlabel('Predicted Labels')
+        plt.ylabel('True Labels')
+        plt.title('Confusion Matrix')
+        plt.show()
+    
+    return predicted_labels, probs_li6, probs_po
