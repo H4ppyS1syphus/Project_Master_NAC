@@ -1,161 +1,221 @@
-"""
-analysis.py
-
-Utility functions for:
-1) Finding an optimal threshold to cap Po contamination at 5%.
-2) Classifying an unlabeled dataset (e.g., Phys) to estimate Li6 vs Po counts.
-"""
+# utils/analysis.py
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
-
-import numpy as np
-import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-def find_threshold_for_contamination(
-    probabilities_li6, 
-    labels, 
-    max_po_contamination=0.05,
-    plot=True
-):
+def get_predictions(model, dataloader, device):
     """
-    Finds a probability threshold that caps the contamination of Po signals at a desired level
-    and optionally plots the confusion matrix and probability distributions.
+    Runs the model on the provided dataloader and returns the predicted probabilities and true labels.
     
     Args:
-        probabilities_li6 (np.ndarray): Shape (N,) => Predicted probability that a sample is Li6.
-        labels (np.ndarray): Shape (N,) => True labels (0=Li6, 1=Po).
-        max_po_contamination (float, optional): Maximum allowed fraction of Po mislabeled as Li6. Defaults to 0.05.
-        plot (bool, optional): Whether to plot the confusion matrix and probability distributions. Defaults to True.
+        model (torch.nn.Module): Trained model to use for predictions.
+        dataloader (torch.utils.data.DataLoader): DataLoader for the dataset.
+        device (torch.device): Device to perform computations on.
     
     Returns:
-        float: The threshold T such that only 'max_po_contamination' fraction of Po gets classified as Li6.
-               If no threshold can achieve that, returns None.
+        np.ndarray, np.ndarray: Array of predicted probabilities for Li6 and true labels.
     """
-    import numpy as np
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+    model.eval()
+    all_probs = []
+    all_labels = []
     
-    # 1) Sort all probabilities in descending order so we can sweep thresholds
-    sort_indices = np.argsort(probabilities_li6)[::-1]
-    sorted_probs = probabilities_li6[sort_indices]
-    sorted_labels = labels[sort_indices]
+    with torch.no_grad():
+        for batch in dataloader:
+            inputs, labels = batch
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+            
+            outputs = model(inputs)
+            if outputs.shape[1] == 1:
+                # Binary classification with a single output (sigmoid)
+                probs = torch.sigmoid(outputs).squeeze().cpu().numpy()
+                probs_li6 = probs  # Assuming output is P(Li6)
+            else:
+                # Binary classification with two outputs (softmax)
+                probs = torch.softmax(outputs, dim=1).cpu().numpy()
+                probs_li6 = probs[:, 0]  # Assuming class 0 is Li6
+            
+            all_probs.extend(probs_li6)
+            all_labels.extend(labels.cpu().numpy())
     
-    # Count total Po
-    total_po = np.sum(sorted_labels == 1)
-    if total_po == 0:
-        print("Warning: No Po samples in dataset. Returning threshold=0.5 by default.")
-        threshold = 0.5
-        if plot:
-            # Plotting the probability distribution
-            plt.figure(figsize=(8,6))
-            sns.histplot(probabilities_li6[labels == 0], color='blue', label='Li6', kde=True, stat="density", bins=30, alpha=0.6)
-            plt.title('Probability Distribution for Li6')
-            plt.xlabel('P(Li6)')
-            plt.ylabel('Density')
-            plt.legend()
-            plt.show()
-        return threshold
-    
-    # 2) Sweep down from highest to lowest probability
-    #    For each unique prob, see how many Po are classified as Li6
-    misclassified_po_count = 0
-    threshold = None
-    for i, prob in enumerate(sorted_probs):
-        lbl = sorted_labels[i]
-        if lbl == 1:
-            misclassified_po_count += 1
-        
-        fraction_po_mis = misclassified_po_count / total_po
-        if fraction_po_mis > max_po_contamination:
-            idx_threshold = i - 1 if i > 0 else 0
-            threshold = sorted_probs[idx_threshold]
-            break
-    
-    # If no threshold found that satisfies the contamination level
-    if threshold is None:
-        threshold = sorted_probs[-1]
-        print(f"No threshold found that limits Po contamination to {max_po_contamination*100}%. Using the lowest probability as threshold.")
-    
-    # 3) Apply the threshold to get predicted labels
-    predicted_labels = (probabilities_li6 <= threshold).astype(int)  # 0=Li6, 1=Po
-    
-    if plot:
-        # Compute Confusion Matrix
-        cm = confusion_matrix(labels, predicted_labels)
-        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['Li6', 'Po'])
-        
-        plt.figure(figsize=(6,5))
-        disp.plot(cmap='Blues', values_format='d')
-        plt.title(f'Confusion Matrix (Threshold={threshold:.4f})')
-        plt.show()
-        
-        # Plot Probability Distributions
-        plt.figure(figsize=(10,6))
-        sns.histplot(probabilities_li6[labels == 0], color='blue', label='Li6', kde=True, stat="density", bins=30, alpha=0.6)
-        sns.histplot(probabilities_li6[labels == 1], color='red', label='Po', kde=True, stat="density", bins=30, alpha=0.6)
-        plt.axvline(threshold, color='green', linestyle='--', label=f'Threshold = {threshold:.4f}')
-        plt.title('Probability Distributions for Li6 and Po')
-        plt.xlabel('P(Li6)')
-        plt.ylabel('Density')
-        plt.legend()
-        plt.show()
-        
-        # Optional: Plot Contamination vs Threshold
-        # This plot shows how the contamination changes as the threshold varies.
-        contamination_rates = []
-        thresholds = sorted_probs
-        for i, prob in enumerate(sorted_probs):
-            lbl = sorted_labels[i]
-            if lbl == 1:
-                misclassified_po_count += 1
-            contamination = misclassified_po_count / total_po
-            contamination_rates.append(contamination)
-        
-        plt.figure(figsize=(10,6))
-        plt.plot(sorted_probs, contamination_rates, label='Po Contamination')
-        plt.axhline(y=max_po_contamination, color='r', linestyle='--', label=f'Max Contamination = {max_po_contamination*100}%')
-        plt.axvline(x=threshold, color='g', linestyle='--', label=f'Threshold = {threshold:.4f}')
-        plt.xlabel('Threshold')
-        plt.ylabel('Po Contamination Rate')
-        plt.title('Po Contamination vs Threshold')
-        plt.legend()
-        plt.show()
-    
-    return threshold
+    return np.array(all_probs), np.array(all_labels)
 
-def plot_histograms_and_confusion_matrices(probabilities_li6, labels, threshold):
+def evaluate_model_with_fixed_threshold(model, model_name, dataloader, device, threshold=0.4):
     """
-    Plots histograms of probabilities and confusion matrices for given thresholds.
-
+    Evaluates a model on a dataset using a fixed probability threshold for classification.
+    Plots the confusion matrix and probability distributions.
+    
     Args:
-        probabilities_li6 (np.ndarray): Predicted probabilities for Li6.
-        labels (np.ndarray): True labels (0=Li6, 1=Po).
-        threshold (float): Computed threshold for classification.
+        model (torch.nn.Module): Trained model to evaluate.
+        model_name (str): Name of the model (for plotting titles).
+        dataloader (torch.utils.data.DataLoader): DataLoader for the dataset.
+        device (torch.device): Device to perform computations on.
+        threshold (float, optional): Fixed probability threshold for classification. Defaults to 0.4.
+    
+    Returns:
+        None
     """
-    # Plot histograms
-    plt.figure(figsize=(12, 6))
-    plt.hist(probabilities_li6[labels == 0], bins=50, alpha=0.5, label="Li6", color="blue")
-    plt.hist(probabilities_li6[labels == 1], bins=50, alpha=0.5, label="Po", color="red")
-    plt.axvline(threshold, color="green", linestyle="--", label=f"Threshold (Found) = {threshold:.2f}")
-    plt.axvline(0.5, color="orange", linestyle="--", label="Threshold = 0.5")
-    plt.xlabel("Predicted Probability")
-    plt.ylabel("Frequency")
-    plt.title("Histogram of Predicted Probabilities")
+    # Get predictions and true labels
+    probabilities_li6, true_labels = get_predictions(model, dataloader, device)
+    
+    # Classify based on the fixed threshold
+    # Ensure consistency: 0=Li6, 1=Po
+    predicted_labels = np.where(probabilities_li6 > threshold, 0, 1)  # 0=Li6, 1=Po based on threshold
+    
+    # Compute confusion matrix
+    cm = confusion_matrix(true_labels, predicted_labels)
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['Li6', 'Po'])
+    
+    # Plot Confusion Matrix
+    plt.figure(figsize=(6,5))
+    disp.plot(cmap='Blues', values_format='d')
+    plt.title(f'Confusion Matrix: {model_name} (Threshold={threshold})')
+    plt.show()
+    
+    # Plot Probability Distributions with threshold
+    plt.figure(figsize=(10,6))
+    sns.histplot(probabilities_li6[true_labels == 0], color='blue', label='Li6', kde=True, stat="density", bins=30, alpha=0.6)
+    sns.histplot(probabilities_li6[true_labels == 1], color='red', label='Po', kde=True, stat="density", bins=30, alpha=0.6)
+    plt.axvline(threshold, color='green', linestyle='--', label=f'Threshold = {threshold}')
+    plt.title(f'Probability Distributions for {model_name}')
+    plt.xlabel('P(Li6)')
+    plt.ylabel('Density')
     plt.legend()
     plt.show()
+    
+    # Print threshold and contamination info
+    po_mislabeled = np.sum((probabilities_li6 > threshold) & (true_labels == 1))
+    total_po = np.sum(true_labels == 1)
+    contamination = (po_mislabeled / total_po) * 100 if total_po > 0 else 0
+    print(f"{model_name} Threshold: {threshold:.2f}")
+    print(f"Po Mislabeled as Li6: {po_mislabeled}/{total_po} ({contamination:.2f}%)")
+    print("-" * 60)
 
-    # Compute and display confusion matrices
-    for thr, name in [(0.5, "Threshold = 0.5"), (threshold, f"Threshold = {threshold:.2f}")]:
-        preds = (probabilities_li6 >= thr).astype(int)
-        cm = confusion_matrix(labels, preds, labels=[0, 1])
-        disp = ConfusionMatrixDisplay(cm, display_labels=["Li6", "Po"])
-        disp.plot(cmap="Blues")
-        plt.title(name)
-        plt.show()
+def evaluate_model_on_balanced_set_with_fixed_threshold(model, model_name, balanced_loader, device, threshold=0.4):
+    """
+    Evaluates a model on a balanced dataset using a fixed probability threshold for classification.
+    Plots the confusion matrix and probability distributions, and prints class counts.
+    
+    Args:
+        model (torch.nn.Module): Trained model to evaluate.
+        model_name (str): Name of the model (for plotting titles).
+        balanced_loader (torch.utils.data.DataLoader): DataLoader for the balanced dataset.
+        device (torch.device): Device to perform computations on.
+        threshold (float, optional): Fixed probability threshold for classification. Defaults to 0.4.
+    
+    Returns:
+        None
+    """
+    # Get predictions and true labels
+    probabilities_li6, true_labels = get_predictions(model, balanced_loader, device)
+    
+    # Classify based on the fixed threshold
+    # Ensure consistency: 0=Li6, 1=Po
+    predicted_labels = np.where(probabilities_li6 > threshold, 0, 1)  # 0=Li6, 1=Po based on threshold
+    
+    # Compute confusion matrix
+    cm = confusion_matrix(true_labels, predicted_labels)
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['Li6', 'Po'])
+    
+    # Plot Confusion Matrix
+    plt.figure(figsize=(6,5))
+    disp.plot(cmap='Blues', values_format='d')
+    plt.title(f'Confusion Matrix (Balanced Dataset): {model_name} (Threshold={threshold})')
+    plt.show()
+    
+    # Plot Probability Distributions with threshold
+    plt.figure(figsize=(10,6))
+    sns.histplot(probabilities_li6[true_labels == 0], color='blue', label='Li6', kde=True, stat="density", bins=30, alpha=0.6)
+    sns.histplot(probabilities_li6[true_labels == 1], color='red', label='Po', kde=True, stat="density", bins=30, alpha=0.6)
+    plt.axvline(threshold, color='green', linestyle='--', label=f'Threshold = {threshold}')
+    plt.title(f'Probability Distributions (Balanced Dataset): {model_name}')
+    plt.xlabel('P(Li6)')
+    plt.ylabel('Density')
+    plt.legend()
+    plt.show()
+    
+    # Print counts
+    total_li6 = np.sum(true_labels == 0)
+    total_po = np.sum(true_labels == 1)
+    predicted_li6 = np.sum(predicted_labels == 0)
+    predicted_po = np.sum(predicted_labels == 1)
+    
+    print(f"{model_name} on Balanced Dataset:")
+    print(f"True Li6: {total_li6}, True Po: {total_po}")
+    print(f"Predicted Li6: {predicted_li6}, Predicted Po: {predicted_po}")
+    print("-" * 60)
+
+def create_balanced_dataset(li6_data, po_data, num_samples_each=None):
+    """
+    Creates a balanced dataset with 50% Li6 and 50% Po.
+    
+    Args:
+        li6_data (np.ndarray): Li6 waveform data.
+        po_data (np.ndarray): Po waveform data.
+        num_samples_each (int, optional): Number of samples for each class. 
+                                          If None, uses the minimum available.
+    
+    Returns:
+        np.ndarray, np.ndarray: Combined data and labels.
+    """
+    if num_samples_each is None:
+        num_samples_each = min(len(li6_data), len(po_data))
+    
+    # Randomly select samples
+    li6_indices = np.random.choice(len(li6_data), num_samples_each, replace=False)
+    po_indices = np.random.choice(len(po_data), num_samples_each, replace=False)
+    
+    balanced_li6 = li6_data[li6_indices]
+    balanced_po = po_data[po_indices]
+    
+    # Create labels
+    li6_labels = np.zeros(num_samples_each, dtype=np.int64)  # 0=Li6
+    po_labels = np.ones(num_samples_each, dtype=np.int64)    # 1=Po
+    
+    # Combine data and labels
+    balanced_data = np.concatenate([balanced_li6, balanced_po], axis=0)
+    balanced_labels = np.concatenate([li6_labels, po_labels], axis=0)
+    
+    return balanced_data, balanced_labels
+
+def create_full_dataset(li6_data, po_data):
+    """
+    Creates a full dataset combining all Li6 and Po data.
+    
+    Args:
+        li6_data (np.ndarray): Li6 waveform data.
+        po_data (np.ndarray): Po waveform data.
+    
+    Returns:
+        np.ndarray, np.ndarray: Combined data and labels.
+    
+    Explanation:
+        We combine the Li6 & Po waveforms, but for deep learning below,
+        we typically rely on the custom 'ScintillationDataset' rather than a single array.
+    """
+    # Create labels for the full dataset
+    li6_labels = np.zeros(len(li6_data), dtype=np.int64)  # 0=Li6
+    po_labels  = np.ones(len(po_data), dtype=np.int64)    # 1=Po
+    
+    # Combine data and labels
+    full_data   = np.concatenate([li6_data, po_data], axis=0)
+    full_labels = np.concatenate([li6_labels, po_labels], axis=0)
+    
+    return full_data, full_labels
+
+class BalancedScintillationDataset(torch.utils.data.Dataset):
+    def __init__(self, data, labels):
+        self.data = torch.tensor(data, dtype=torch.float32)
+        self.labels = torch.tensor(labels, dtype=torch.int64)
+    
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, idx):
+        return self.data[idx], self.labels[idx]
 
 def classify_dataset(
     model, 
@@ -202,4 +262,3 @@ def classify_dataset(
             predicted_labels.extend(batch_preds)
 
     return np.array(predicted_labels)
-
