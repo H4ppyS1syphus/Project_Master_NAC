@@ -8,6 +8,14 @@ This repository provides tools and code for **pulse shape discrimination** of sc
 - **Utilities** (`utils/` directory): Reusable modules for data loading, feature extraction, model training, and uncertainty estimation.
 - **Data** (`data/` directory): Sample datasets (`.npz` files) used for illustration and testing, including `Li6.npz`, `Po.npz`, and `Phys.npz`.
 
+To use it, use the following commmands:
+
+  ```bash
+  git clone https://github.com/H4ppyS1syphus/Project_Master_NAC
+  git lfs pull 
+  ```
+
+
 ## 2. Environment Setup
 
 To ensure reproducibility, follow these steps to create a Python virtual environment and install the required packages.
