@@ -1,10 +1,3 @@
-"""
-uncertainty.py
-
-Utilities for estimating epistemic uncertainty in PyTorch models using
-Monte Carlo (MC) Dropout, plus plotting functions to visualize results.
-"""
-
 import torch
 import numpy as np
 import matplotlib.pyplot as plt

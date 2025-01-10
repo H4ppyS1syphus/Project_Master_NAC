@@ -1,9 +1,3 @@
-"""
-waveforms_analysis.py
-
-Functions for statistical analysis and plotting of Li6/Po waveforms.
-"""
-
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
